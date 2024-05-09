@@ -1,6 +1,12 @@
 # Keycloak Server Spi Private Patch
 
-## The bug that requires this Patch
+## Keycloak version
+
+This patch has been made for version 16.1.1
+
+## The bugs that requires this Patch
+
+### My problem
 
 We are using ConditionalOTP (one time password) in browser flow.
 
@@ -8,14 +14,23 @@ To use it, we need to define a keycloak role and associate one or more LDAP grou
 
 We are using LDAP_ONLY mode in group-ldap-mapper in ldap federation configuration.
 
+## Where can be a solution too
+
+https://keycloak.discourse.group/t/performance-issue-with-large-number-of-ldap-group/7740
+
+# Explanation
+
 For some reason, keycloak tries to check the group membership in the evaluation of the ConditionalOTP condition by walking the group tree and check the tree path that in case of lots of groups can be really slow.
 
 The code that does this breadth-first search is in org.keycloak.models.utils.KeycloakModelUtils::findGroupByPath function in org.keycloak:keycloak-server-spi-private:16.1.1 artifact.
 
+So, the idea behind this path is the following: instead of doing this BFS we have to collect all groups with the name of the last group of the group path then calculate and check their paths for matching.
+
+
 The code that has to be replaced:
 
 <pre>
-      return realm.getTopLevelGroupsStream().map(group -> {
+      return realm.getTopLevelGroupsStream().map(group -> { // instead of search for exact match we iterate over
             String groupName = group.getName();
             String[] pathSegments = formatPathSegments(split, 0, groupName);
 
@@ -25,7 +40,7 @@ The code that has to be replaced:
                 }
                 else {
                     if (pathSegments.length > 1) {
-                        GroupModel subGroup = findSubGroup(pathSegments, 1, group);
+                        GroupModel subGroup = findSubGroup(pathSegments, 1, group); // findSubGroup - call it recursively
                         if (subGroup != null) return subGroup;
                     }
                 }
@@ -38,8 +53,8 @@ The code that has to be replaced:
 The new version:
 
 <pre>
-        return = realm.searchForGroupByNameStream(lastGroupNameInPath, null, null)
-        		.filter(group -> checkGroupPath(group, searchedPath))
+        return = realm.searchForGroupByNameStream(lastGroupNameInPath, null, null) // find for exact match 
+        		.filter(group -> checkGroupPath(group, searchedPath)) // check only the matching groups
         		.findFirst().orElse(null);
 </pre>
 
